@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robo-X | AI & Robotics</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(135deg,#06101f,#101d3a,#06101f);color:#fff;min-height:100vh}
+.container{width:90%;max-width:1000px;margin:auto;padding:30px 0}
+h1{text-align:center;color:#35e7ff;letter-spacing:3px;margin:0 0 5px}
+.subtitle{text-align:center;color:#aaa;margin-bottom:25px}
+.dashboard{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.card{background:rgba(255,255,255,.07);border:1px solid rgba(0,220,255,.25);border-radius:20px;padding:20px;box-shadow:0 0 25px rgba(0,200,255,.12)}
+#robot{width:100%;height:320px}
+#robot canvas{display:block;margin:auto}
+.status{text-align:center;color:#35e7ff;margin-top:8px;min-height:22px}
+#chat{height:320px;overflow-y:auto;padding:10px;background:rgba(0,0,0,.25);border-radius:12px;margin-bottom:12px}
+.msg{margin:8px 0;padding:8px 12px;border-radius:12px;max-width:85%;line-height:1.4}
+.user{background:#0b6bff;margin-left:auto}
+.bot{background:rgba(53,231,255,.15);border:1px solid rgba(53,231,255,.3)}
+.row{display:flex;gap:8px}
+input{flex:1;padding:12px;border-radius:10px;border:1px solid rgba(0,220,255,.4);background:rgba(0,0,0,.35);color:#fff;font-size:15px}
+input:disabled{opacity:.5}
+button{padding:12px 16px;border:0;border-radius:10px;font-weight:bold;cursor:pointer;color:#06101f;background:#35e7ff;font-size:14px}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.stop{background:#ff5a6e;color:#fff}
+button.mic.on{background:#7dff9b}
+.controls{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+@media(max-width:760px){.dashboard{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>ROBO-X</h1>
+  <div class="subtitle">AI &amp; Robotics Assistant</div>
+  <div class="dashboard">
+    <div class="card">
+      <div id="robot"></div>
+      <div class="status" id="status">Robot is offline</div>
+    </div>
+    <div class="card">
+      <div id="chat"></div>
+      <div class="row">
+        <input id="input" placeholder="Press START AI first" disabled>
+        <button id="send" disabled>SEND</button>
+      </div>
+      <div class="controls">
+        <button id="start">START AI</button>
+        <button id="mic" class="mic" disabled>🎤 Voice: off</button>
+        <button id="stop" class="stop">STOP</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ---------- 3D robot ---------- */
+const holder = document.getElementById('robot');
+const W = holder.clientWidth, H = 320;
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(45, W/H, 0.1, 100);
+cam.position.set(0, 0.3, 6);
+const renderer = new THREE.WebGLRenderer({alpha:true, antialias:true});
+renderer.setSize(W, H);
+holder.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, .65));
+const sun = new THREE.DirectionalLight(0xffffff, .9);
+sun.position.set(3, 4, 5); scene.add(sun);
+
+const metal = new THREE.MeshStandardMaterial({color:0x3a8dff, metalness:.5, roughness:.35});
+const dark  = new THREE.MeshStandardMaterial({color:0x0b1530});
+const glow  = new THREE.MeshBasicMaterial({color:0x35e7ff});
+
+const robot = new THREE.Group();
+const head = new THREE.Group();
+head.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, 1.1), metal));
+const face = new THREE.Mesh(new THREE.BoxGeometry(1.2, .7, .05), dark);
+face.position.set(0, 0, .56); head.add(face);
+const eyes = [-.3, .3].map(x => {
+  const e = new THREE.Mesh(new THREE.SphereGeometry(.12, 16, 16), glow);
+  e.position.set(x, .1, .6); head.add(e); return e;
+});
+const mouth = new THREE.Mesh(new THREE.BoxGeometry(.5, .06, .04), glow);
+mouth.position.set(0, -.18, .6); head.add(mouth);
+const antenna = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, .4), metal);
+antenna.position.y = .75; head.add(antenna);
+const tip = new THREE.Mesh(new THREE.SphereGeometry(.09, 12, 12), glow);
+tip.position.y = 1; head.add(tip);
+head.position.y = 1.1;
+
+const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.5, 1), metal);
+body.position.y = -.2;
+const armL = new THREE.Mesh(new THREE.BoxGeometry(.3, 1.2, .3), metal);
+armL.position.set(-1.1, -.2, 0);
+const armR = armL.clone(); armR.position.x = 1.1;
+robot.add(head, body, armL, armR);
+scene.add(robot);
+
+let online = false, talking = false;
+(function loop(t){
+  requestAnimationFrame(loop);
+  const s = t / 1000;
+  robot.position.y = Math.sin(s * 1.5) * .06;
+  robot.rotation.y = Math.sin(s * .6) * .25;
+  head.rotation.z = talking ? Math.sin(s * 9) * .06 : 0;
+  mouth.scale.y = talking ? 1 + Math.abs(Math.sin(s * 14)) * 5 : 1;
+  const blink = Math.sin(s * 2) > .97 ? .1 : 1;
+  eyes.forEach(e => e.scale.y = blink);
+  glow.color.set(online ? 0x35e7ff : 0x445566);
+  renderer.render(scene, cam);
+})(0);
+
+/* ---------- Chat ---------- */
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const startBtn = document.getElementById('start');
+const micBtn = document.getElementById('mic');
+const stopBtn = document.getElementById('stop');
+const statusEl = document.getElementById('status');
+let voiceOn = false;
+
+function add(text, who){
+  const d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.textContent = text;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function speak(text){
+  if(!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-US';
+  u.onstart = () => { talking = true; statusEl.textContent = 'Robot is speaking...'; };
+  u.onend = u.onerror = () => { talking = false; statusEl.textContent = online ? 'Robot is online' : 'Robot is offline'; };
+  speechSynthesis.speak(u);
+}
+
+function reply(q){
+  q = q.toLowerCase();
+  if(/\b(hi|hello|hey)\b/.test(q)) return 'Hello! I am Robo-X. How can I help you today?';
+  if(q.includes('your name') || q.includes('who are you')) return 'I am Robo-X, an AI and robotics assistant.';
+  if(q.includes('robot')) return 'A robot is a machine that senses its surroundings, makes decisions, and acts. It has sensors, a controller, and motors.';
+  if(/\bai\b|artificial/.test(q)) return 'Artificial Intelligence lets machines learn from data and make decisions, like recognising speech or images.';
+  if(q.includes('time')) return 'The time is ' + new Date().toLocaleTimeString() + '.';
+  if(q.includes('date') || q.includes('day')) return 'Today is ' + new Date().toDateString() + '.';
+  if(q.includes('joke')) return 'Why did the robot go on holiday? It needed to recharge its batteries!';
+  if(q.includes('help')) return 'Ask me about robots, AI, the time, or the date. You can also ask for a joke.';
+  if(q.includes('bye')) return 'Goodbye! See you soon.';
+  return 'I am still learning. Try asking about robots, AI, time, or a joke.';
+}
+
+function send(){
+  if(!online) return;
+  const q = input.value.trim();
+  if(!q) return;
+  add(q, 'user');
+  input.value = '';
+  const a = reply(q);
+  setTimeout(() => {
+    add(a, 'bot');
+    if(voiceOn) speak(a);
+  }, 350);
+}
+
+startBtn.onclick = () => {
+  online = true;
+  input.disabled = sendBtn.disabled = micBtn.disabled = false;
+  input.placeholder = 'Type your message and press Enter';
+  input.focus();
+  startBtn.disabled = true;
+  statusEl.textContent = 'Robot is online';
+  const g = 'Robo-X is online. How can I help you?';
+  add(g, 'bot');
+  if(voiceOn) speak(g);
+};
+
+sendBtn.onclick = send;
+input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
+
+micBtn.onclick = () => {
+  voiceOn = !voiceOn;
+  micBtn.classList.toggle('on', voiceOn);
+  micBtn.textContent = '🎤 Voice: ' + (voiceOn ? 'on' : 'off');
+  if(voiceOn){
+    const last = [...chat.querySelectorAll('.bot')].pop();
+    speak(last ? last.textContent : 'Voice is on.');
+  } else {
+    speechSynthesis.cancel();
+  }
+};
+
+stopBtn.onclick = () => {
+  speechSynthesis.cancel();
+  talking = false;
+  statusEl.textContent = online ? 'Robot is online' : 'Robot is offline';
+};
+</script>
+</body>
+</html>
